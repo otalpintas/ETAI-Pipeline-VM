@@ -139,3 +139,68 @@ False positive rate by race (development set, out-of-fold)
 Reduced overall false arrest/prediction rates: Compared to COMPAS, both iterations of your model reduced the false positive rate for all main categories (African-American FPR decreased from 45% to 26–30%; Caucasian FPR decreased from 23% to 13–16%).
 
 While the absolute difference between African-American and Caucasian defendants decreased dramatically (from a +22% difference to +13%), the relative ratio remained approximately 2:1, suggesting systemic historical bias in underlying features (such as prior arrests or criminal history) that tree regularisation alone cannot fully equalise.
+
+# Week 9 (Option A)
+
+Cross-validation (5 stratified folds, metric: roc_auc)
+
+ fold  train  validation    gap
+    1  0.906       0.896  0.009
+    2  0.906       0.896  0.010
+    3  0.904       0.924 -0.020
+    4  0.912       0.876  0.037
+    5  0.904       0.895  0.009
+
+Train       mean = 0.907   std = 0.003
+Validation  mean = 0.898   std = 0.017
+Gap         mean = +0.009   std = 0.020
+
+Nested cross-validation: 5 outer folds x 12 trials x 3 inner folds ...
+Cross-validation (5 stratified folds, metric: roc_auc)
+
+ fold  train  validation    gap  inner_best select__threshold  model__estimator__max_depth  model__n_estimators  model__learning_rate
+    1  0.911       0.907  0.004       0.904          0.5*mean                            1                  208                 0.477
+    2  0.918       0.907  0.011       0.903          0.5*mean                            2                  108                 0.365
+    3  0.906       0.923 -0.018       0.893              mean                            3                  165                 0.094
+    4  0.912       0.879  0.032       0.905              mean                            3                   87                 0.237
+    5  0.913       0.897  0.016       0.900          0.5*mean                            2                  108                 0.365
+
+Train       mean = 0.912   std = 0.004
+Validation  mean = 0.903   std = 0.016
+Gap         mean = +0.009   std = 0.018
+
+Tuning on the whole development set (12 Optuna trials, metric: roc_auc)
+Best hyperparameters: {'select__threshold': 'mean', 'model__estimator__max_depth': 3, 'model__n_estimators': 165, 'model__learning_rate': 0.09420457098319444}
+Best mean CV score:   0.900  (the maximum over all trials -- optimistic)
+
+Top 5 trials:
+ trial  mean roc_auc  model__estimator__max_depth  model__learning_rate  model__n_estimators select__threshold   std
+    11         0.900                            3                 0.094                  165              mean 0.004
+     7         0.899                            3                 0.237                   87              mean 0.004
+     4         0.898                            3                 0.057                  144              mean 0.003
+    10         0.897                            4                 0.420                   80              mean 0.007
+     0         0.896                            3                 0.080                   66              mean 0.003
+
+Optimism check (nested CV):
+  tuning score inside the outer folds (inner_best) mean = 0.901
+  honest score on the outer folds (validation)     mean = 0.903
+  optimism = -0.002   -> report the honest one
+Classification report (out-of-fold predictions, development set):
+              precision    recall  f1-score   support
+
+           0      0.876     0.940     0.907      3651
+           1      0.751     0.578     0.653      1149
+
+    accuracy                          0.853      4800
+   macro avg      0.814     0.759     0.780      4800
+weighted avg      0.846     0.853     0.846      4800
+
+False positive rate by sex (development set, out-of-fold)
+(share of negative cases predicted positive)
+
+  Our model:
+    Female               FPR = 0.01  (n=1390)
+    Male                 FPR = 0.09  (n=2261)
+
+The pipeline was modified for the Adult income dataset (Option A) by generating config_adult.yaml, updating main.py to score adult_new.csv and accept a configuration argument, generalising missing-value ("?") replacement across all string columns in src/preprocessing.py, and making the COMPAS benchmark optional in src/evaluate.Py.   The model obtained an honest nested CV ROC-AUC of 0.903 (train 0.912 vs. validation 0.903, gap +0.009), accuracy of 0.854, and F1-score (class 1) of 0.653 using target encoding, robust scaling, missingness indicators (workclass, occupation), SelectFromModel, and nested cross-validation with Optuna tuning on AdaBoost (max_depth=3, n_estimators=165, learning_rate=0.094). While maintaining the original COMPAS pipeline, feature selection automatically eliminated all 25 anonymised noise columns (v01–v25) and kept the six primary predictors (age, education_num, capital_gain, marital_status, occupation, and relationship), producing all 2,000 predictions in results_adult/adult_predictions.csv.
+

@@ -1,12 +1,15 @@
 """
-Entry point: `python main.py`.
+Entry point: `python main.py` (defaults to config.yaml) or `python main.py config_adult.yaml`.
 
 load config -> load and clean data -> drop duplicate rows (training only) -> features/target
 -> lock the test set -> cross-validate the pipeline on the development set
 -> [if tuning is enabled: nested CV of the tuning procedure, then tuning on all development rows]
 -> out-of-fold classification and fairness reports -> refit on all development rows -> save the report
+-> [if predict_path is set: predict unseen rows and save CSV]
 """
+import sys
 import optuna
+import pandas as pd
 import yaml
 from sklearn.model_selection import StratifiedKFold
 
@@ -24,7 +27,8 @@ def load_config(path: str = "config.yaml") -> dict:
 
 
 def main():
-    config = load_config()
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    config = load_config(config_path)
 
     df_raw = load_data(config["data"]["path"])
     df_clean = clean_dataset(df_raw, config["diagnostics"])
@@ -44,13 +48,16 @@ def main():
 
     cv_config = config["cv"]
     shuffle = cv_config.get("shuffle", True)
-    cv = StratifiedKFold(n_splits=cv_config["n_splits"], shuffle=shuffle,
-                         random_state=cv_config.get("random_state") if shuffle else None)
+    cv = StratifiedKFold(
+        n_splits=cv_config["n_splits"],
+        shuffle=shuffle,
+        random_state=cv_config.get("random_state") if shuffle else None,
+    )
     scoring = cv_config.get("scoring", "accuracy")
     n_jobs = cv_config.get("n_jobs", 1)
 
     fold_scores, y_oof = cross_validate_pipeline(pipeline, X_dev, y_dev, cv, scoring, n_jobs=n_jobs)
-    header = f"Hyperparameters from config.yaml: {config['model'].get('params')}"
+    header = f"Hyperparameters from {config_path}: {config['model'].get('params')}"
     print(header)
     report = header + "\n" + cv_report(fold_scores, scoring)
 
@@ -60,8 +67,10 @@ def main():
         model_type = config["model"]["type"]
         search_spaces = tuning_config.get("search_spaces") or {}
         if model_type not in search_spaces:
-            raise ValueError(f"tuning is enabled but config.yaml has no tuning.search_spaces for "
-                             f"'{model_type}'. Add one, or set tuning.enabled: false.")
+            raise ValueError(
+                f"tuning is enabled but {config_path} has no tuning.search_spaces for "
+                f"'{model_type}'. Add one, or set tuning.enabled: false."
+            )
         search_space = search_spaces[model_type]
         n_trials = tuning_config["n_trials"]
         tuning_seed = tuning_config["random_state"]
@@ -69,8 +78,10 @@ def main():
         inner_cv = StratifiedKFold(n_splits=tuning_config["n_splits"], shuffle=True, random_state=tuning_seed)
 
         # Honest estimate on the same outer folds; its out-of-fold predictions feed the reports.
-        print(f"\nNested cross-validation: {cv.get_n_splits()} outer folds x {n_trials} trials x "
-              f"{inner_cv.get_n_splits()} inner folds ...")
+        print(
+            f"\nNested cross-validation: {cv.get_n_splits()} outer folds x {n_trials} trials x "
+            f"{inner_cv.get_n_splits()} inner folds ..."
+        )
         nested_scores, y_oof = nested_cross_validate(
             pipeline, X_dev, y_dev, cv, inner_cv, scoring, search_space, n_trials, tuning_seed, n_jobs=n_jobs
         )
@@ -94,14 +105,43 @@ def main():
     print(refit)
     report += "\n" + refit + "\n"
 
-    locked = (f"Locked test set: {len(X_test)} rows set aside, not evaluated. "
-              f"Development set: {len(X_dev)} rows.")
+    if "select" in pipeline.named_steps:
+        kept = pipeline.named_steps["prep"].get_feature_names_out()[pipeline.named_steps["select"].get_support()]
+        kept_line = f"Features kept ({len(kept)}): {list(kept)}"
+        print(kept_line)
+        report += "\n" + kept_line + "\n"
+
+    locked = (
+        f"Locked test set: {len(X_test)} rows set aside, not evaluated. "
+        f"Development set: {len(X_dev)} rows."
+    )
     print(locked)
     report += "\n" + locked + "\n"
 
     results_dir = config.get("output", {}).get("results_dir", "results")
     path = save_run(results_dir, config, report)
     print(f"Full results saved to {path}")
+
+    # Predict unseen rows (e.g., adult_new.csv) if predict_path is configured
+    predict_path = config["data"].get("predict_path")
+    if predict_path:
+        df_new_raw = load_data(predict_path)
+        df_new_clean = clean_dataset(df_new_raw, config["diagnostics"])
+        # Do NOT call drop_duplicate_rows() here: every row needs a prediction
+        X_new, _, _ = split_features_target(df_new_clean, config["data"], mnar_sources)
+        X_new = X_new[X_dev.columns]
+
+        probs = pipeline.predict_proba(X_new)[:, 1]
+        preds = (probs >= 0.5).astype(int)
+
+        pred_df = pd.DataFrame({
+            "id": df_new_clean[config["diagnostics"]["id_column"]],
+            "probability": probs,
+            "prediction": preds,
+        })
+        pred_out = f"{results_dir}/adult_predictions.csv"
+        pred_df.to_csv(pred_out, index=False)
+        print(f"Saved {len(pred_df)} predictions to {pred_out}")
 
 
 if __name__ == "__main__":

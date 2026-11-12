@@ -38,13 +38,18 @@ def flag_invalid_values(df: pd.DataFrame, rules: dict) -> pd.DataFrame:
 
 def _canonicalize_categories(df: pd.DataFrame, columns_and_maps: dict, placeholder_tokens: set) -> pd.DataFrame:
     out = df.copy()
+    # 1. Strip whitespace and turn placeholder tokens ("?", etc.) into NaN across ALL text columns
+    for col in out.select_dtypes(include=["object", "string"]).columns:
+        cleaned = out[col].astype(str).str.strip()
+        is_missing = out[col].isna() | cleaned.isin(placeholder_tokens)
+        out[col] = cleaned.where(~is_missing, np.nan)
+
+    # 2. Apply spelling canonicalization maps where configured
     for col, mapping in columns_and_maps.items():
         if col not in out.columns:
             continue
-        cleaned = out[col].astype(str).str.strip()
-        lowered = cleaned.str.lower()
-        out[col] = lowered.map(mapping).fillna(cleaned)
-        out.loc[out[col].astype(str).str.strip().isin(placeholder_tokens), col] = np.nan
+        lowered = out[col].dropna().astype(str).str.lower()
+        out.loc[lowered.index, col] = lowered.map(mapping).fillna(out.loc[lowered.index, col])
     return out
 
 

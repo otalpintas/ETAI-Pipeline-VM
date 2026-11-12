@@ -5,6 +5,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.random_projection import SparseRandomProjection
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.feature_selection import SelectFromModel
+from sklearn.ensemble import ExtraTreesClassifier
 
 from src.preprocessing import build_preprocessor
 
@@ -55,13 +57,15 @@ def build_model(model_config: dict):
 
 
 def build_pipeline(preprocessing_config: dict, model_config: dict) -> Pipeline:
-    """
-    The estimator that is cross-validated, tuned and refit: preprocessing and model as one
-    Pipeline, so every learned step is re-fit on the training part of each fold. Step names
-    address hyperparameters from outside (`model__max_depth`, `prep__numeric__impute__strategy`).
-    Any new learned step (e.g. feature selection) belongs here, between "prep" and "model".
-    """
-    return Pipeline([
-        ("prep", build_preprocessor(preprocessing_config)),
-        ("model", build_model(model_config)),
-    ])
+    steps = [("prep", build_preprocessor(preprocessing_config))]
+
+    fs_config = preprocessing_config.get("feature_selection")
+    if fs_config and fs_config.get("enabled", False):
+        selector = SelectFromModel(
+            estimator=ExtraTreesClassifier(n_estimators=100, random_state=42, n_jobs=-1),
+            threshold=fs_config.get("threshold", "median"),
+        )
+        steps.append(("select", selector))
+
+    steps.append(("model", build_model(model_config)))
+    return Pipeline(steps)

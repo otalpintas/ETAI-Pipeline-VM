@@ -1,0 +1,95 @@
+data:
+  path: "data/adult_train.csv"
+  predict_path: "data/adult_new.csv"
+  target: "income_over_50k"
+  sensitive_attr: "sex"                            # never a feature; used only for the fairness report
+  drop_columns: ["id", "fnlwgt", "education"]      # kept in the data, never used as features
+
+test_set:
+  size: 0.2
+  random_state: 42
+
+cv:
+  n_splits: 5
+  shuffle: true
+  random_state: 42
+  scoring: "roc_auc"
+  n_jobs: -1
+
+diagnostics:
+  id_column: "id"
+  numeric_text_columns: []
+  placeholder_tokens: ["-", "?", "n/a", "N/A", "na", "NA", "", "nan"]
+  validity_rules:
+    age: {min: 17, max: 90}
+    hours_per_week: {min: 1, max: 99}
+    capital_gain: {min: 0}
+    capital_loss: {min: 0}
+  canonical_categories:
+    sex:
+      male: "Male"
+      female: "Female"
+    race:
+      white: "White"
+      black: "Black"
+      asian-pac-islander: "Asian-Pac-Islander"
+      amer-indian-eskimo: "Amer-Indian-Eskimo"
+      other: "Other"
+  redundant_columns: ["education"]
+
+preprocessing:
+  encoder: "target"
+  scaler: "robust"
+  numeric_features: [
+    "age", "education_num", "capital_gain", "capital_loss", "hours_per_week",
+    "v01", "v02", "v03", "v04", "v05", "v06", "v07", "v08", "v09",
+    "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18"
+  ]
+  categorical_features: [
+    "workclass", "marital_status", "occupation", "relationship", "race", "native_country",
+    "v19", "v20", "v21", "v22", "v23", "v24", "v25"
+  ]
+  mnar_indicator_sources: ["workclass", "occupation"]
+  random_state: 42
+  imputation:
+    numeric_strategy: "median"
+    categorical_strategy: "most_frequent"
+  feature_selection:
+    enabled: true
+    threshold: "mean"
+
+model:
+  type: "adaboost"
+  params:
+    max_depth: 2
+    n_estimators: 200
+    learning_rate: 0.5
+    random_state: 42
+
+tuning:
+  enabled: true
+  n_trials: 12
+  n_splits: 3
+  random_state: 42
+  search_spaces:
+    decision_tree:
+      model__max_depth: {type: int, low: 1, high: 20}
+      model__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__criterion: {type: categorical, choices: ["gini", "entropy"]}
+    random_forest:
+      select__threshold: {type: categorical, choices: ["0.5*mean", "mean", "1.25*mean"]}
+      model__max_depth: {type: int, low: 6, high: 20}
+      model__min_samples_leaf: {type: int, low: 2, high: 30, log: true}
+      model__max_features: {type: categorical, choices: ["sqrt", 0.5]}
+    oblique_random_forest:
+      model__estimator__tree__max_depth: {type: int, low: 2, high: 30}
+      model__estimator__tree__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__estimator__project__n_components: {type: int, low: 3, high: 10}
+    adaboost:
+      select__threshold: {type: categorical, choices: ["0.5*mean", "mean", "1.25*mean"]}
+      model__estimator__max_depth: {type: int, low: 1, high: 4}
+      model__n_estimators: {type: int, low: 50, high: 300, log: true}
+      model__learning_rate: {type: float, low: 0.05, high: 1.0, log: true}
+
+output:
+  results_dir: "results_adult"
