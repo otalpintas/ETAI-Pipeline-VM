@@ -21,13 +21,13 @@ from src.tuning import tune_pipeline, nested_cross_validate, tuning_report
 from src.results import save_run
 
 
-def load_config(path: str = "config.yaml") -> dict:
+def load_config(path: str = "config_adult.yaml") -> dict:
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
 
 def main():
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config_adult.yaml"
     config = load_config(config_path)
 
     df_raw = load_data(config["data"]["path"])
